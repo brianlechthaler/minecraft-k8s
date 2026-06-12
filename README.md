@@ -218,6 +218,23 @@ Logs:
 kubectl -n minecraft logs -f deployment/survival
 ```
 
+## Publishing
+
+The repository is initialized locally on branch `main`. To publish to GitHub:
+
+```bash
+# Requires a GitHub personal access token with repo scope
+GH_TOKEN=<your-token> ./scripts/publish.sh
+```
+
+Alternatively, create an empty public repository at [github.com/new](https://github.com/new?name=minecraft-k8s) named `minecraft-k8s`, then push via SSH:
+
+```bash
+git push -u origin main
+```
+
+Remote URL: `git@github.com:brianlechthaler/minecraft-k8s.git`
+
 ## License
 
 MIT — Minecraft is a trademark of Mojang/Microsoft. Mods are subject to their respective licenses.
