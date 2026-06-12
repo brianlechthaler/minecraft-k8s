@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -19,12 +23,12 @@ jobs:
       - name: Build test container
         run: docker build -f docker/Dockerfile.rust-test -t minecraft-k8s-test:ci .
 
-      - name: Run unit tests
+      - name: Run unit and integration tests
         run: |
           docker run --rm -v "${{ github.workspace }}:/src" -w /src minecraft-k8s-test:ci \
             "cargo test --workspace --all-features"
 
-      - name: Run coverage (100% required)
+      - name: Enforce 100% line coverage
         run: |
           docker run --rm --security-opt seccomp=unconfined -v "${{ github.workspace }}:/src" -w /src minecraft-k8s-test:ci \
             "cargo tarpaulin --workspace --out Xml --output-dir /tmp/coverage --fail-under 100 --timeout 300 --exclude-files '*/main.rs' '*/tests/*'"
@@ -39,6 +43,12 @@ jobs:
       - name: Build tools image
         run: docker build -f docker/Dockerfile.rust -t minecraft-k8s-tools:ci .
 
+      - name: Assert manifests reference GHCR server image
+        run: |
+          grep -q 'ghcr.io/brianlechthaler/minecraft-k8s-server' k8s/manifests.yaml
+          grep -q 'ghcr.io/brianlechthaler/minecraft-k8s-server' k8s/kustomization.yaml
+          grep -q 'ghcr.io/brianlechthaler/minecraft-k8s-server' config/server.toml
+
       - name: Validate committed manifests
         run: |
           docker run --rm -v "${{ github.workspace }}:/src:ro" -w /src minecraft-k8s-tools:ci \
@@ -49,8 +59,9 @@ jobs:
           docker run --rm -v "${{ github.workspace }}:/src:ro" -w /src minecraft-k8s-tools:ci \
             validate --config /src/config/server.toml
 
-      - name: Render manifests from config and validate
+      - name: Render manifests from config and validate GHCR image
         run: |
+          mkdir -p k8s/generated
           docker run --rm \
             -v "${{ github.workspace }}:/src:ro" \
             -v "${{ github.workspace }}/k8s/generated:/out" \
@@ -59,9 +70,10 @@ jobs:
             render --config /src/config/server.toml --output /out/rendered.yaml
           docker run --rm -v "${{ github.workspace }}:/src:ro" -w /src minecraft-k8s-tools:ci \
             check-manifests --path /src/k8s/generated/rendered.yaml
+          grep -q 'ghcr.io/brianlechthaler/minecraft-k8s-server' k8s/generated/rendered.yaml
 
   docker-build:
-    name: Docker image build
+    name: Build Docker images
     runs-on: ubuntu-latest
     needs: manifest-validation
     steps:
@@ -73,7 +85,75 @@ jobs:
       - name: Build Minecraft server image
         run: docker build -f docker/Dockerfile.minecraft -t minecraft-k8s-server:ci .
 
-      - name: Smoke test probe binary in server image
+      - name: Smoke test binaries in images
         run: |
           docker run --rm --entrypoint minecraft-k8s minecraft-k8s-server:ci --help
           docker run --rm minecraft-k8s-tools:ci --help
+
+  publish-ghcr:
+    name: Publish images to GHCR
+    runs-on: ubuntu-latest
+    needs: docker-build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata (server)
+        id: meta-server
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/brianlechthaler/minecraft-k8s-server
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+
+      - name: Build and push server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.minecraft
+          push: true
+          tags: ${{ steps.meta-server.outputs.tags }}
+          labels: ${{ steps.meta-server.outputs.labels }}
+
+      - name: Docker metadata (tools)
+        id: meta-tools
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/brianlechthaler/minecraft-k8s-tools
+          tags: |
+            type=raw,value=latest
+            type=sha,format=long
+
+      - name: Build and push tools image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.rust
+          push: true
+          tags: ${{ steps.meta-tools.outputs.tags }}
+          labels: ${{ steps.meta-tools.outputs.labels }}
+
+      - name: Set GHCR package visibility to public
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          for pkg in minecraft-k8s-server minecraft-k8s-tools; do
+            gh api --method PUT \
+              "/user/packages/container/${pkg}/visibility" \
+              -f visibility=public \
+              || gh api --method PATCH \
+              "/user/packages/container/${pkg}/visibility" \
+              -f visibility=public
+          done

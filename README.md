@@ -181,20 +181,23 @@ The container image inherits environment-variable semantics from [itzg/minecraft
 
 ## CI/CD
 
-### `ci.yml` (on push/PR to `main`)
+### `.github/workflows/ci.yml`
 
-1. Build test container
-2. Run `cargo test` inside Docker
-3. Enforce 100% tarpaulin coverage
-4. Validate Kubernetes manifests and example config
-5. Build server and tools images (smoke test)
+Runs on every push and pull request to `main`:
 
-### `release.yml` (on push to `main` or version tags)
+| Job | What it does |
+|-----|----------------|
+| **rust-tests** | Runs `cargo test` (unit + integration) in Docker; enforces 100% line coverage via `cargo-tarpaulin` |
+| **manifest-validation** | Verifies `k8s/manifests.yaml`, `config/server.toml`, and rendered output all reference `ghcr.io/brianlechthaler/minecraft-k8s-server`; validates YAML structure |
+| **docker-build** | Builds server and tools images locally; smoke-tests the CLI binaries |
+| **publish-ghcr** | *(push to `main` only)* Builds, pushes, and sets **public** visibility on GHCR images |
 
-Publishes to GitHub Container Registry:
+Published container images (public on GHCR):
 
-- `ghcr.io/brianlechthaler/minecraft-k8s-server`
-- `ghcr.io/brianlechthaler/minecraft-k8s-tools`
+- `ghcr.io/brianlechthaler/minecraft-k8s-server:latest` (and `:sha-…` per commit)
+- `ghcr.io/brianlechthaler/minecraft-k8s-tools:latest` (and `:sha-…` per commit)
+
+Kubernetes manifests in `k8s/manifests.yaml` and `config/server.toml` already point at the GHCR server image.
 
 ## Security notes
 
