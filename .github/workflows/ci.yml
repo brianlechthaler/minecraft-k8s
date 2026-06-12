@@ -150,10 +150,13 @@ jobs:
         run: |
           set -euo pipefail
           for pkg in minecraft-k8s-server minecraft-k8s-tools; do
-            gh api --method PUT \
-              "/user/packages/container/${pkg}/visibility" \
-              -f visibility=public \
-              || gh api --method PATCH \
-              "/user/packages/container/${pkg}/visibility" \
+            status=$(gh api "user/packages/container/${pkg}" --jq '.visibility' 2>/dev/null || echo "unknown")
+            echo "Current visibility for ${pkg}: ${status}"
+            if [ "${status}" = "public" ]; then
+              echo "✓ ${pkg} is already public"
+              continue
+            fi
+            gh api --method PATCH "user/packages/container/${pkg}" \
               -f visibility=public
+            echo "✓ ${pkg} is now public"
           done
