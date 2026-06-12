@@ -81,7 +81,18 @@ where
     I: IntoIterator<Item = S>,
     S: Into<std::ffi::OsString> + Clone,
 {
-    let cli = Cli::try_parse_from(args).map_err(|e| AppError::Config(e.to_string()))?;
+    let cli = match Cli::try_parse_from(args) {
+        Ok(cli) => cli,
+        Err(err) => {
+            if err.kind() == clap::error::ErrorKind::DisplayHelp
+                || err.kind() == clap::error::ErrorKind::DisplayVersion
+            {
+                err.print().map_err(|e| AppError::Config(e.to_string()))?;
+                return Ok(());
+            }
+            return Err(AppError::Config(err.to_string()));
+        }
+    };
     dispatch(cli.command)
 }
 
@@ -209,6 +220,12 @@ eula = true
             0
         );
         assert_eq!(entry_from(["minecraft-k8s", "nope"]), 4);
+    }
+
+    #[test]
+    fn entry_help_succeeds() {
+        assert_eq!(entry_from(["minecraft-k8s", "--help"]), 0);
+        assert_eq!(entry_from(["minecraft-k8s", "-h"]), 0);
     }
 
     #[test]
