@@ -1,0 +1,35 @@
+services:
+  rust-test:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rust-test
+    volumes:
+      - ..:/workspace:ro
+    working_dir: /workspace
+
+  rust-build:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rust
+    image: ghcr.io/brianlechthaler/minecraft-k8s-tools:latest
+
+  minecraft:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.minecraft
+    image: ghcr.io/brianlechthaler/minecraft-k8s-server:latest
+    ports:
+      - "25565:25565"
+    environment:
+      EULA: "TRUE"
+      TYPE: FORGE
+      VERSION: "1.20.1"
+      FORGE_VERSION: "47.2.0"
+      MEMORY: 2G
+      ONLINE_MODE: "FALSE"
+    volumes:
+      - minecraft-data:/data
+      - ../mods:/data/mods:ro
+
+volumes:
+  minecraft-data:

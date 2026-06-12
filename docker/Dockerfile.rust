@@ -1,0 +1,14 @@
+# syntax=docker/dockerfile:1
+
+FROM rust:bookworm AS builder
+WORKDIR /build
+COPY Cargo.toml Cargo.lock* ./
+COPY crates ./crates
+RUN cargo build --release --locked 2>/dev/null || cargo build --release
+
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /build/target/release/minecraft-k8s /usr/local/bin/minecraft-k8s
+ENTRYPOINT ["minecraft-k8s"]

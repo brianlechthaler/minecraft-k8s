@@ -1,0 +1,28 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+
+# Local test artifacts
+/tmp/
+*.log
+coverage/
+tarpaulin-report.html
+
+# Generated manifests (optional local output)
+k8s/generated/
+
+# Minecraft runtime data (never commit worlds)
+data/
+world/
+mods/*.jar
+
+# Secrets
+.env
+*.pem

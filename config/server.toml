@@ -1,0 +1,22 @@
+name = "survival"
+namespace = "minecraft"
+minecraft_version = "1.20.1"
+mod_loader = "forge"
+forge_version = "47.2.0"
+memory = "4G"
+port = 25565
+replicas = 1
+storage_size = "20Gi"
+eula = true
+max_players = 20
+motd = "Modded Minecraft on Kubernetes"
+image = "ghcr.io/brianlechthaler/minecraft-k8s-server"
+image_tag = "latest"
+
+# Optional: install a CurseForge/Modrinth modpack at startup
+# modpack_url = "https://example.com/modpack.zip"
+
+# Optional extra environment variables passed to the server container
+# [[extra_env]]
+# name = "MODS"
+# value = "/mods/extra"
