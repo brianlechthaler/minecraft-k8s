@@ -20,6 +20,12 @@ pub enum AppError {
 
     #[error("probe failed with exit code {0}")]
     ProbeFailed(i32),
+
+    #[error("rcon error: {0}")]
+    Rcon(String),
+
+    #[error("dashboard error: {0}")]
+    Dashboard(String),
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
@@ -73,5 +79,13 @@ mod tests {
     fn probe_failed_error_display() {
         let err = AppError::ProbeFailed(1);
         assert_eq!(err.to_string(), "probe failed with exit code 1");
+    }
+
+    #[test]
+    fn rcon_and_dashboard_error_display() {
+        let err = AppError::Rcon("auth".into());
+        assert_eq!(err.to_string(), "rcon error: auth");
+        let err = AppError::Dashboard("bind".into());
+        assert_eq!(err.to_string(), "dashboard error: bind");
     }
 }

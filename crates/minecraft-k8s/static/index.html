@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Minecraft Server Dashboard</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e7ecf3;
+      --muted: #8b9cb3;
+      --online: #3ddc84;
+      --offline: #ff6b6b;
+      --accent: #5b9cff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, Segoe UI, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; padding: 2rem 1rem 3rem; }
+    header { margin-bottom: 1.5rem; }
+    h1 { margin: 0 0 .25rem; font-size: 1.75rem; }
+    .subtitle { color: var(--muted); margin: 0; }
+    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+    }
+    .card h2 { margin: 0 0 .75rem; font-size: 1rem; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .status-row { display: flex; align-items: center; gap: .75rem; font-size: 1.25rem; font-weight: 600; }
+    .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--offline); }
+    .dot.online { background: var(--online); box-shadow: 0 0 12px rgba(61, 220, 132, .5); }
+    .meta { color: var(--muted); margin-top: .5rem; font-size: .95rem; }
+    ul.players { list-style: none; padding: 0; margin: 0; }
+    ul.players li { padding: .35rem 0; border-bottom: 1px solid var(--border); }
+    ul.players li:last-child { border-bottom: 0; }
+    .empty { color: var(--muted); font-style: italic; }
+    form { display: flex; flex-direction: column; gap: .75rem; }
+    input, select, button, textarea {
+      font: inherit;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: #111822;
+      color: var(--text);
+      padding: .65rem .75rem;
+    }
+    button {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #04101f;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.danger { background: #c0392b; border-color: #c0392b; color: #fff; }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+    .output {
+      margin-top: .75rem;
+      padding: .75rem;
+      background: #111822;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      min-height: 2.5rem;
+      white-space: pre-wrap;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: .85rem;
+    }
+    footer { margin-top: 2rem; color: var(--muted); font-size: .85rem; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Minecraft Server Dashboard</h1>
+      <p class="subtitle" id="motd">Loading server status…</p>
+    </header>
+
+    <div class="grid">
+      <section class="card">
+        <h2>Status</h2>
+        <div class="status-row">
+          <span class="dot" id="status-dot"></span>
+          <span id="status-text">Checking…</span>
+        </div>
+        <p class="meta" id="player-meta">—</p>
+        <p class="meta" id="rcon-meta">—</p>
+      </section>
+
+      <section class="card">
+        <h2>Players Online</h2>
+        <ul class="players" id="player-list">
+          <li class="empty">No players online</li>
+        </ul>
+      </section>
+
+      <section class="card">
+        <h2>Server Actions</h2>
+        <form id="command-form">
+          <select id="command-select">
+            <option value="list">Refresh player list</option>
+            <option value="save-all">Save world</option>
+            <option value="say">Broadcast message</option>
+            <option value="stop">Stop server</option>
+          </select>
+          <input type="text" id="command-arg" placeholder="Message for /say (optional)" />
+          <button type="submit" id="run-btn">Run command</button>
+        </form>
+        <div class="output" id="command-output">Ready.</div>
+      </section>
+    </div>
+
+    <footer>Auto-refreshes every 5 seconds · RCON-backed management</footer>
+  </div>
+
+  <script>
+    const statusDot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    const playerMeta = document.getElementById('player-meta');
+    const rconMeta = document.getElementById('rcon-meta');
+    const motd = document.getElementById('motd');
+    const playerList = document.getElementById('player-list');
+    const commandForm = document.getElementById('command-form');
+    const commandSelect = document.getElementById('command-select');
+    const commandArg = document.getElementById('command-arg');
+    const commandOutput = document.getElementById('command-output');
+    const runBtn = document.getElementById('run-btn');
+
+    async function refreshStatus() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        statusDot.classList.toggle('online', data.online);
+        statusText.textContent = data.online ? 'Online' : 'Offline';
+        motd.textContent = data.motd || 'Minecraft Server';
+        playerMeta.textContent = `${data.player_count} / ${data.max_players} players`;
+        rconMeta.textContent = data.rcon_available ? 'RCON connected' : 'RCON unavailable';
+        playerList.innerHTML = '';
+        if (!data.players.length) {
+          const li = document.createElement('li');
+          li.className = 'empty';
+          li.textContent = data.online ? 'No players online' : 'Server offline';
+          playerList.appendChild(li);
+        } else {
+          data.players.forEach(name => {
+            const li = document.createElement('li');
+            li.textContent = name;
+            playerList.appendChild(li);
+          });
+        }
+        runBtn.disabled = !data.online || !data.rcon_available;
+      } catch (err) {
+        statusText.textContent = 'Error';
+        commandOutput.textContent = String(err);
+      }
+    }
+
+    commandForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      let command = commandSelect.value;
+      const arg = commandArg.value.trim();
+      if (command === 'say' && arg) command = `say ${arg}`;
+      if (command === 'say' && !arg) {
+        commandOutput.textContent = 'Enter a message to broadcast.';
+        return;
+      }
+      runBtn.disabled = true;
+      commandOutput.textContent = 'Running…';
+      try {
+        const res = await fetch('/api/command', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command }),
+        });
+        const data = await res.json();
+        commandOutput.textContent = data.output || data.error || 'Done.';
+        await refreshStatus();
+      } catch (err) {
+        commandOutput.textContent = String(err);
+      } finally {
+        runBtn.disabled = false;
+      }
+    });
+
+    refreshStatus();
+    setInterval(refreshStatus, 5000);
+  </script>
+</body>
+</html>

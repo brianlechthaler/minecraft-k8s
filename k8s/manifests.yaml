@@ -1,21 +1,14 @@
+---
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: minecraft
   labels:
-    app.kubernetes.io/name: survival
     app.kubernetes.io/component: minecraft-server
     app.kubernetes.io/managed-by: minecraft-k8s
+    app.kubernetes.io/name: survival
+  name: minecraft
 ---
 apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: survival-config
-  namespace: minecraft
-  labels:
-    app.kubernetes.io/name: survival
-    app.kubernetes.io/component: minecraft-server
-    app.kubernetes.io/managed-by: minecraft-k8s
 data:
   server.properties: |
     motd=Modded Minecraft on Kubernetes
@@ -23,19 +16,40 @@ data:
     server-port=25565
     online-mode=true
     enable-rcon=true
+kind: ConfigMap
+metadata:
+  labels:
+    app.kubernetes.io/component: minecraft-server
+    app.kubernetes.io/managed-by: minecraft-k8s
+    app.kubernetes.io/name: survival
+  name: survival-config
+  namespace: minecraft
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    app.kubernetes.io/component: minecraft-server
+    app.kubernetes.io/managed-by: minecraft-k8s
+    app.kubernetes.io/name: survival
+  name: survival-rcon
+  namespace: minecraft
+stringData:
+  password: minecraft-k8s-rcon
+type: Opaque
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: survival-data
-  namespace: minecraft
   labels:
-    app.kubernetes.io/name: survival
     app.kubernetes.io/component: minecraft-server
     app.kubernetes.io/managed-by: minecraft-k8s
+    app.kubernetes.io/name: survival
+  name: survival-data
+  namespace: minecraft
 spec:
   accessModes:
-    - ReadWriteOnce
+  - ReadWriteOnce
   resources:
     requests:
       storage: 20Gi
@@ -43,15 +57,15 @@ spec:
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: survival-mods
-  namespace: minecraft
   labels:
-    app.kubernetes.io/name: survival
     app.kubernetes.io/component: minecraft-server
     app.kubernetes.io/managed-by: minecraft-k8s
+    app.kubernetes.io/name: survival
+  name: survival-mods
+  namespace: minecraft
 spec:
   accessModes:
-    - ReadWriteOnce
+  - ReadWriteOnce
   resources:
     requests:
       storage: 5Gi
@@ -59,123 +73,229 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: survival
-  namespace: minecraft
   labels:
-    app.kubernetes.io/name: survival
     app.kubernetes.io/component: minecraft-server
     app.kubernetes.io/managed-by: minecraft-k8s
+    app.kubernetes.io/name: survival
+  name: survival
+  namespace: minecraft
 spec:
   replicas: 1
-  strategy:
-    type: Recreate
   selector:
     matchLabels:
       app.kubernetes.io/name: survival
+  strategy:
+    type: Recreate
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: survival
         app.kubernetes.io/component: minecraft-server
         app.kubernetes.io/managed-by: minecraft-k8s
+        app.kubernetes.io/name: survival
     spec:
+      containers:
+      - env:
+        - name: EULA
+          value: 'TRUE'
+        - name: TYPE
+          value: FORGE
+        - name: VERSION
+          value: 1.20.1
+        - name: MEMORY
+          value: 4G
+        - name: MAX_PLAYERS
+          value: '20'
+        - name: MOTD
+          value: Modded Minecraft on Kubernetes
+        - name: ENABLE_RCON
+          value: 'true'
+        - name: RCON_PORT
+          value: '25575'
+        - name: USE_AIKAR_FLAGS
+          value: 'true'
+        - name: SYNC_SKIP_NEWER_IN_DESTINATION
+          value: 'false'
+        - name: FORGE_VERSION
+          value: 47.2.0
+        - name: RCON_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: survival-rcon
+        image: ghcr.io/brianlechthaler/minecraft-k8s-server:latest
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          exec:
+            command:
+            - /usr/local/bin/minecraft-k8s
+            - probe
+            - --port
+            - '25565'
+          failureThreshold: 6
+          initialDelaySeconds: 120
+          periodSeconds: 30
+          timeoutSeconds: 5
+        name: minecraft
+        ports:
+        - containerPort: 25565
+          name: minecraft
+          protocol: TCP
+        - containerPort: 25575
+          name: rcon
+          protocol: TCP
+        readinessProbe:
+          exec:
+            command:
+            - /usr/local/bin/minecraft-k8s
+            - probe
+            - --port
+            - '25565'
+          failureThreshold: 12
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+        resources:
+          limits:
+            cpu: '2'
+            memory: 4G
+          requests:
+            cpu: 500m
+            memory: 2Gi
+        volumeMounts:
+        - mountPath: /data
+          name: data
+        - mountPath: /data/mods
+          name: mods
       securityContext:
         fsGroup: 1000
-        runAsUser: 1000
         runAsNonRoot: true
-      containers:
-        - name: minecraft
-          image: ghcr.io/brianlechthaler/minecraft-k8s-server:latest
-          imagePullPolicy: IfNotPresent
-          ports:
-            - name: minecraft
-              containerPort: 25565
-              protocol: TCP
-            - name: rcon
-              containerPort: 25575
-              protocol: TCP
-          env:
-            - name: EULA
-              value: "TRUE"
-            - name: TYPE
-              value: FORGE
-            - name: VERSION
-              value: "1.20.1"
-            - name: FORGE_VERSION
-              value: "47.2.0"
-            - name: MEMORY
-              value: 4G
-            - name: MAX_PLAYERS
-              value: "20"
-            - name: MOTD
-              value: Modded Minecraft on Kubernetes
-            - name: ENABLE_RCON
-              value: "true"
-            - name: RCON_PASSWORD
-              value: minecraft-k8s-rcon
-            - name: RCON_PORT
-              value: "25575"
-            - name: USE_AIKAR_FLAGS
-              value: "true"
-            - name: SYNC_SKIP_NEWER_IN_DESTINATION
-              value: "false"
-          resources:
-            requests:
-              memory: 2Gi
-              cpu: 500m
-            limits:
-              memory: 4G
-              cpu: "2"
-          volumeMounts:
-            - name: data
-              mountPath: /data
-            - name: mods
-              mountPath: /data/mods
-          readinessProbe:
-            exec:
-              command:
-                - /usr/local/bin/minecraft-k8s
-                - probe
-                - --port
-                - "25565"
-            initialDelaySeconds: 60
-            periodSeconds: 10
-            failureThreshold: 12
-            timeoutSeconds: 5
-          livenessProbe:
-            exec:
-              command:
-                - /usr/local/bin/minecraft-k8s
-                - probe
-                - --port
-                - "25565"
-            initialDelaySeconds: 120
-            periodSeconds: 30
-            failureThreshold: 6
-            timeoutSeconds: 5
+        runAsUser: 1000
       volumes:
-        - name: data
-          persistentVolumeClaim:
-            claimName: survival-data
-        - name: mods
-          persistentVolumeClaim:
-            claimName: survival-mods
+      - name: data
+        persistentVolumeClaim:
+          claimName: survival-data
+      - name: mods
+        persistentVolumeClaim:
+          claimName: survival-mods
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: survival-mc
-  namespace: minecraft
   labels:
-    app.kubernetes.io/name: survival
     app.kubernetes.io/component: minecraft-server
     app.kubernetes.io/managed-by: minecraft-k8s
+    app.kubernetes.io/name: survival
+  name: survival-mc
+  namespace: minecraft
 spec:
-  type: LoadBalancer
+  ports:
+  - name: minecraft
+    port: 25565
+    protocol: TCP
+    targetPort: minecraft
   selector:
     app.kubernetes.io/name: survival
+  type: LoadBalancer
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/component: minecraft-server
+    app.kubernetes.io/managed-by: minecraft-k8s
+    app.kubernetes.io/name: survival
+  name: survival-rcon
+  namespace: minecraft
+spec:
   ports:
-    - name: minecraft
-      port: 25565
-      targetPort: minecraft
-      protocol: TCP
+  - name: rcon
+    port: 25575
+    protocol: TCP
+    targetPort: rcon
+  selector:
+    app.kubernetes.io/name: survival
+  type: ClusterIP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/managed-by: minecraft-k8s
+    app.kubernetes.io/name: survival-dashboard
+  name: survival-dashboard
+  namespace: minecraft
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: survival-dashboard
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: dashboard
+        app.kubernetes.io/managed-by: minecraft-k8s
+        app.kubernetes.io/name: survival-dashboard
+    spec:
+      containers:
+      - args:
+        - serve
+        - --bind-host
+        - 0.0.0.0
+        - --bind-port
+        - '8080'
+        - --minecraft-host
+        - survival-mc.minecraft.svc.cluster.local
+        - --minecraft-port
+        - '25565'
+        - --rcon-host
+        - survival-rcon.minecraft.svc.cluster.local
+        - --rcon-port
+        - '25575'
+        - --rcon-password
+        - minecraft-k8s-rcon
+        image: ghcr.io/brianlechthaler/minecraft-k8s-tools:latest
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          httpGet:
+            path: /api/status
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        name: dashboard
+        ports:
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /api/status
+            port: http
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          limits:
+            cpu: 200m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/component: dashboard
+    app.kubernetes.io/managed-by: minecraft-k8s
+    app.kubernetes.io/name: survival-dashboard
+  name: survival-dashboard
+  namespace: minecraft
+spec:
+  ports:
+  - name: http
+    port: 8080
+    protocol: TCP
+    targetPort: http
+  selector:
+    app.kubernetes.io/name: survival-dashboard
+  type: ClusterIP

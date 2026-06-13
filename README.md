@@ -9,6 +9,7 @@ All development, testing, and builds run **inside Docker** — nothing is instal
 - **Mod support** via [itzg/minecraft-server](https://hub.docker.com/r/itzg/minecraft-server) (`TYPE=FORGE|FABRIC|QUILT`)
 - **Kubernetes manifests** for namespace, PVCs (world + mods), Deployment, Service, ConfigMap
 - **Rust CLI** (`minecraft-k8s`) for config validation, manifest rendering, health probes, and mod JAR checks
+- **Web dashboard** for server status, player list, and RCON-backed management commands
 - **100% line coverage** on library/CLI code (enforced in CI via `cargo-tarpaulin`)
 - **GitHub Actions** for tests, manifest validation, and container image builds
 
@@ -86,6 +87,16 @@ kubectl -n minecraft port-forward svc/survival-mc 25565:25565
 
 Connect in Minecraft to `localhost:25565`.
 
+### 5. Open the management dashboard
+
+The dashboard is deployed as `survival-dashboard` in the `minecraft` namespace:
+
+```bash
+kubectl -n minecraft port-forward svc/survival-dashboard 8080:8080
+```
+
+Open [http://localhost:8080](http://localhost:8080) to view server status, online players, and run allowed RCON commands (`list`, `say`, `save-all`, `stop`, etc.).
+
 ## Configuration
 
 Edit `config/server.toml`:
@@ -120,6 +131,15 @@ docker compose up --build minecraft
 
 Place mod JARs in `mods/` before starting. The server uses Forge 1.20.1 by default with `ONLINE_MODE=FALSE` for local testing.
 
+Run the dashboard alongside the server:
+
+```bash
+cd docker
+docker compose up --build minecraft dashboard
+```
+
+Then open [http://localhost:8080](http://localhost:8080).
+
 ## Rust CLI
 
 The `minecraft-k8s` binary is built inside Docker and embedded in the server image for Kubernetes probes.
@@ -131,6 +151,7 @@ The `minecraft-k8s` binary is built inside Docker and embedded in the server ima
 | `check-manifests --path <yaml>` | Validate manifest YAML structure |
 | `probe --port 25565` | TCP health check (used by K8s probes) |
 | `write-eula --output <path>` | Write accepted `eula.txt` |
+| `serve` | Run the web management dashboard (status, players, RCON commands) |
 
 ### Running tests (Docker only)
 
@@ -146,17 +167,26 @@ This runs all unit/integration tests and enforces **100% line coverage** on `src
 flowchart TB
     subgraph k8s [Kubernetes namespace: minecraft]
         SVC[Service survival-mc<br/>LoadBalancer :25565]
+        DASH[Service survival-dashboard<br/>ClusterIP :8080]
+        RCON[Service survival-rcon<br/>ClusterIP :25575]
         DEP[Deployment survival<br/>Recreate strategy]
+        DASH_DEP[Deployment survival-dashboard]
         PVC_DATA[PVC survival-data<br/>/data world + config]
         PVC_MODS[PVC survival-mods<br/>/data/mods]
         CM[ConfigMap survival-config]
+        SEC[Secret survival-rcon]
     end
 
     Client[Minecraft clients] --> SVC
+    Admin[Browser / admin] --> DASH
+    DASH --> DASH_DEP
+    DASH_DEP --> RCON
+    DASH_DEP --> SVC
     SVC --> DEP
+    RCON --> DEP
     DEP --> PVC_DATA
     DEP --> PVC_MODS
-    DEP --> CM
+    DEP --> SEC
     DEP --> IMG[minecraft-k8s-server image<br/>Forge/Fabric + probe binary]
 ```
 
@@ -165,6 +195,7 @@ flowchart TB
 - **Single replica** with `Recreate` strategy — Minecraft servers are stateful; only one pod may mount the world PVC at a time.
 - **Separate mods PVC** — mods can be updated independently and re-synced on restart.
 - **TCP probes** — readiness/liveness use the Rust `probe` command against port 25565.
+- **RCON-backed dashboard** — internal ClusterIP service for RCON; dashboard exposes HTTP on port 8080.
 - **Non-root** — container runs as UID 1000 with `fsGroup` 1000.
 
 ## Mod loaders
@@ -198,6 +229,7 @@ Published container images (public on GHCR):
 - `ghcr.io/brianlechthaler/minecraft-k8s-tools:latest` (and `:sha-…` per commit)
 
 Kubernetes manifests in `k8s/manifests.yaml` and `config/server.toml` already point at the GHCR server image.
+- **Non-root** — container runs as UID 1000 with `fsGroup` 1000.
 
 ## Security notes
 

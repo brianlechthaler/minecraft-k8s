@@ -27,9 +27,38 @@ services:
       FORGE_VERSION: "47.2.0"
       MEMORY: 2G
       ONLINE_MODE: "FALSE"
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: minecraft-k8s-rcon
+      RCON_PORT: "25575"
     volumes:
       - minecraft-data:/data
       - ../mods:/data/mods:ro
+
+  dashboard:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.rust
+    image: ghcr.io/brianlechthaler/minecraft-k8s-tools:latest
+    command:
+      - serve
+      - --bind-host
+      - "0.0.0.0"
+      - --bind-port
+      - "8080"
+      - --minecraft-host
+      - minecraft
+      - --minecraft-port
+      - "25565"
+      - --rcon-host
+      - minecraft
+      - --rcon-port
+      - "25575"
+      - --rcon-password
+      - minecraft-k8s-rcon
+    ports:
+      - "8080:8080"
+    depends_on:
+      - minecraft
 
 volumes:
   minecraft-data:

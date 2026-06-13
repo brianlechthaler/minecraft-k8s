@@ -89,6 +89,11 @@ jobs:
         run: |
           docker run --rm --entrypoint minecraft-k8s minecraft-k8s-server:ci --help
           docker run --rm minecraft-k8s-tools:ci --help
+          docker run --rm -d --name mc-dashboard-smoke -p 18080:8080 minecraft-k8s-tools:ci \
+            serve --bind-host 0.0.0.0 --bind-port 8080 --minecraft-host 127.0.0.1 --minecraft-port 1
+          sleep 2
+          curl -sf http://127.0.0.1:18080/api/status
+          docker stop mc-dashboard-smoke
 
   publish-ghcr:
     name: Publish images to GHCR
