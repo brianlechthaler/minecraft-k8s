@@ -9,6 +9,7 @@ use crate::health;
 use crate::k8s;
 use crate::mods;
 use crate::eula;
+use crate::dashboard::{self, DashboardConfig};
 use crate::ServerConfig;
 
 #[derive(Parser, Debug)]
@@ -55,6 +56,25 @@ pub enum Commands {
     WriteEula {
         #[arg(short, long)]
         output: PathBuf,
+    },
+    /// Run the web management dashboard
+    Serve {
+        #[arg(long, default_value = "0.0.0.0")]
+        bind_host: String,
+        #[arg(long, default_value_t = 8080)]
+        bind_port: u16,
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+        #[arg(long, default_value = "127.0.0.1")]
+        minecraft_host: String,
+        #[arg(long, default_value_t = 25565)]
+        minecraft_port: u16,
+        #[arg(long, default_value = "127.0.0.1")]
+        rcon_host: String,
+        #[arg(long, default_value_t = 25575)]
+        rcon_port: u16,
+        #[arg(long, default_value = "minecraft-k8s-rcon")]
+        rcon_password: String,
     },
 }
 
@@ -104,6 +124,8 @@ pub fn exit_code(err: &AppError) -> i32 {
         AppError::Manifest(_) => 6,
         AppError::Io { .. } => 7,
         AppError::ProbeFailed(code) => *code,
+        AppError::Rcon(_) => 8,
+        AppError::Dashboard(_) => 9,
     }
 }
 
@@ -118,6 +140,25 @@ pub fn dispatch(command: Commands) -> Result<()> {
             timeout_secs,
         } => cmd_probe(host, port, timeout_secs),
         Commands::WriteEula { output } => cmd_write_eula(output),
+        Commands::Serve {
+            bind_host,
+            bind_port,
+            config,
+            minecraft_host,
+            minecraft_port,
+            rcon_host,
+            rcon_port,
+            rcon_password,
+        } => cmd_serve(
+            bind_host,
+            bind_port,
+            config,
+            minecraft_host,
+            minecraft_port,
+            rcon_host,
+            rcon_port,
+            rcon_password,
+        ),
     }
 }
 
@@ -176,6 +217,43 @@ pub fn cmd_write_eula(output: PathBuf) -> Result<()> {
         message: e.to_string(),
     })?;
     Ok(())
+}
+
+pub fn cmd_serve(
+    bind_host: String,
+    bind_port: u16,
+    config: Option<PathBuf>,
+    minecraft_host: String,
+    minecraft_port: u16,
+    rcon_host: String,
+    rcon_port: u16,
+    rcon_password: String,
+) -> Result<()> {
+    let (max_players, motd) = if let Some(path) = config {
+        let content = read_to_string(&path)?;
+        let cfg = ServerConfig::from_toml(&content)?;
+        cfg.validate()?;
+        (cfg.max_players, cfg.motd)
+    } else {
+        (20, "Minecraft Server".into())
+    };
+
+    let dashboard_config = DashboardConfig {
+        bind_host,
+        bind_port,
+        minecraft_host,
+        minecraft_port,
+        rcon_host,
+        rcon_port,
+        rcon_password,
+        max_players,
+        motd,
+        probe_timeout: Duration::from_secs(5),
+    };
+
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|e| AppError::Dashboard(format!("runtime error: {e}")))?;
+    runtime.block_on(dashboard::serve(dashboard_config))
 }
 
 pub fn read_to_string(path: &PathBuf) -> Result<String> {
@@ -248,6 +326,8 @@ eula = true
             7
         );
         assert_eq!(exit_code(&AppError::ProbeFailed(1)), 1);
+        assert_eq!(exit_code(&AppError::Rcon("x".into())), 8);
+        assert_eq!(exit_code(&AppError::Dashboard("x".into())), 9);
     }
 
     #[test]
@@ -345,6 +425,69 @@ eula = true
         std::fs::write(&cfg, SAMPLE).unwrap();
         let err = cmd_render(cfg, Some(dir.path().to_path_buf())).unwrap_err();
         assert!(matches!(err, AppError::Io { .. }));
+    }
+
+    #[test]
+    fn cmd_serve_bind_failure() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let err = cmd_serve(
+            "127.0.0.1".into(),
+            port,
+            None,
+            "127.0.0.1".into(),
+            1,
+            "127.0.0.1".into(),
+            1,
+            "secret".into(),
+        )
+        .unwrap_err();
+        assert!(matches!(err, AppError::Dashboard(_)));
+    }
+
+    #[test]
+    fn cmd_serve_with_config() {
+        use std::net::{TcpListener, TcpStream};
+        use std::thread;
+        let dir = TempDir::new().unwrap();
+        let cfg = dir.path().join("server.toml");
+        std::fs::write(&cfg, SAMPLE).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let cfg_path = cfg.clone();
+        thread::spawn(move || {
+            let _ = cmd_serve(
+                "127.0.0.1".into(),
+                port,
+                Some(cfg_path),
+                "127.0.0.1".into(),
+                1,
+                "127.0.0.1".into(),
+                1,
+                "secret".into(),
+            );
+        });
+        thread::sleep(std::time::Duration::from_millis(300));
+        assert!(TcpStream::connect(format!("127.0.0.1:{port}")).is_ok());
+    }
+
+    #[test]
+    fn run_from_serve_bind_failure() {
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let code = entry_from([
+            "minecraft-k8s",
+            "serve",
+            "--bind-host",
+            "127.0.0.1",
+            "--bind-port",
+            &port.to_string(),
+        ]);
+        assert_eq!(code, 9);
     }
 
     #[test]
